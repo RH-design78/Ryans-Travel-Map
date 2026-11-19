@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#B93A0B">
+<meta name="robots" content="noindex">
+<title>Holidays with Denise</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#F6F4EF;color:#15171C;font:18px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:20px}
+form{background:#fff;border:1px solid #E2DED4;border-radius:24px;padding:30px 26px;width:min(100%,400px);display:grid;gap:14px}
+img{width:64px;height:64px;border-radius:16px}h1{margin:0;font-size:28px;line-height:1.1}p{margin:0;color:#474C58;font-size:16px}
+label{font-weight:700;font-size:16px}input{font:inherit;padding:13px 14px;border:2px solid #E2DED4;border-radius:12px;width:100%}input:focus{outline:none;border-color:#B93A0B}
+button{font:700 18px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#B93A0B;color:#fff;border:none;border-radius:999px;padding:13px;cursor:pointer}button:disabled{opacity:.6}
+.err{color:#B3261E;font-weight:700}[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<form id="f" hidden>
+  <img src="icons/icon-192.png" alt="">
+  <h1>Holidays with Denise</h1>
+  <p>Enter your travel map password to unlock this page. This phone will remember it.</p>
+  <p class="err" id="err" role="alert" hidden></p>
+  <label for="pw">Password</label>
+  <input id="pw" type="password" autocomplete="current-password" required autofocus>
+  <button id="go" type="submit">Open the page</button>
+</form>
+<p id="wait">Opening…</p>
+<script>
+// Everything except this page is locked with the password (AES-GCM). Nothing readable is stored on the website.
+(()=>{
+  const SALT='7339949fad7656f99106810d75fa22e5', ITER=310000;
+  const hex=h=>new Uint8Array(h.match(/../g).map(x=>parseInt(x,16)));
+  const b64=a=>btoa(String.fromCharCode(...new Uint8Array(a))), unb64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+  const f=document.getElementById('f'), err=document.getElementById('err'), go=document.getElementById('go'), wait=document.getElementById('wait');
+  const showForm=msg=>{ wait.hidden=true; f.hidden=false; if(msg){ err.textContent=msg; err.hidden=false; } };
+  async function derive(pw){
+    const base=await crypto.subtle.importKey('raw',new TextEncoder().encode(pw),'PBKDF2',false,['deriveKey']);
+    return crypto.subtle.deriveKey({name:'PBKDF2',salt:hex(SALT),iterations:ITER,hash:'SHA-256'},base,{name:'AES-GCM',length:256},true,['decrypt']);
+  }
+  async function open(key){
+    const r=await fetch('denise.enc',{cache:'no-cache'}); if(!r.ok) throw new Error('net');
+    const b=new Uint8Array(await r.arrayBuffer());
+    const html=new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:b.slice(0,12)},key,b.slice(12)));
+    window.__TMKEY=key; document.open(); document.write(html); document.close();
+  }
+  async function start(){
+    if(!window.crypto||!crypto.subtle) return showForm('This browser can’t unlock the map. Please open it in Chrome.');
+    let saved=null; try{ saved=localStorage.getItem('tm-key'); }catch(e){}
+    if(saved){ try{ const k=await crypto.subtle.importKey('raw',unb64(saved),{name:'AES-GCM'},true,['decrypt']); await open(k); return; }catch(e){ if(String(e.message)==='net') return showForm('Couldn’t reach the map. Check your signal and try again.'); try{localStorage.removeItem('tm-key')}catch(_){} } }
+    showForm();
+  }
+  f.addEventListener('submit',async e=>{ e.preventDefault(); go.disabled=true; go.textContent='Unlocking…'; err.hidden=true;
+    try{ const k=await derive(document.getElementById('pw').value);
+      try{ await open(k); }catch(x){ go.disabled=false; go.textContent='Open the page'; return showForm(String(x.message)==='net'?'Couldn’t reach the map. Check your signal and try again.':'That password is not right. Try again.'); }
+      try{ localStorage.setItem('tm-key',b64(await crypto.subtle.exportKey('raw',k))); }catch(_){}
+    }catch(x){ go.disabled=false; go.textContent='Open the page'; showForm('Something went wrong. Try again.'); } });
+  if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
+  start();
+})();
+</script>
+</body>
+</html>
